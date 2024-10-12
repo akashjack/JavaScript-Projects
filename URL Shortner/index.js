@@ -9,44 +9,47 @@ const shortId = require('shortid');
 const db = require('../URL Shortner/Data/db');
 const shorturlModel = require('../URL Shortner/Models/shorturlModel');
 
+// Database connection
 db();
+
 app.use(cors({ optionsSuccessStatus: 200 }));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-
 app.use('/public', express.static(`${process.cwd()}/public`));
 
+// Route to serve index.html
 app.get('/', (req, res) => {
   res.sendFile(process.cwd() + '/views/index.html');
 });
 
+// Test route
 app.get('/api/hello', (req, res) => {
   res.json({ greeting: 'hello API' });
 });
 
-var jsonParser = bodyParser.json();
-
-app.post('/api/shorturl', jsonParser, async (req, res) => {
+// URL Shortener - Create a shortened URL
+app.post('/api/shorturl', async (req, res) => {
   try {
-    let client_req_url = req.body.url;
-    let suffix = shortId.generate();
-    console.log('suffix', suffix);
+    const { url: client_req_url } = req.body;
 
-    let newURL = new shorturlModel({
-      short_url: __dirname + '/api/shorturl/' + suffix,
+    // Validate URL format
+    const urlPattern = /^(https?:\/\/)(www\.)?[\w\-]+\.\w{2,}([\/\w\-]*)*$/;
+    if (!urlPattern.test(client_req_url)) {
+      return res.json({ error: 'invalid url' });
+    }
+
+    const suffix = shortId.generate();
+    const newURL = new shorturlModel({
+      short_url: suffix,
       original_url: client_req_url,
-      suffix: suffix,
     });
 
-    // Save the new URL (using async/await)
     await newURL.save();
 
-    console.log('Document inserted successfully!');
     res.json({
       saved: true,
-      short_url: newURL.short_url,
-      original_url: newURL.original_url,
-      suffix: newURL.suffix,
+      short_url: `/api/shorturl/${suffix}`,
+      original_url: client_req_url,
     });
   } catch (err) {
     console.error('Error saving document:', err);
@@ -54,27 +57,25 @@ app.post('/api/shorturl', jsonParser, async (req, res) => {
   }
 });
 
+// URL Shortener - Redirect using the short URL
 app.get('/api/shorturl/:suffix', async (req, res) => {
   try {
-    let userGeneratedSuffix = req.params.suffix;
-
-    // Find the URL (using async/await)
-    let userRequestedUrl = await shorturlModel.findOne({ suffix: userGeneratedSuffix });
+    const { suffix } = req.params;
+    const userRequestedUrl = await shorturlModel.findOne({ short_url: suffix });
 
     if (!userRequestedUrl) {
       return res.status(404).json({ error: 'URL not found' });
     }
 
-    res.json({
-      usersuffix: userGeneratedSuffix,
-      userRequestedUrl: userRequestedUrl,
-    });
+    // Redirect to the original URL
+    res.redirect(userRequestedUrl.original_url);
   } catch (err) {
     console.error('Error fetching document:', err);
     res.status(500).json({ error: 'Failed to fetch URL' });
   }
 });
 
+// Start server
 app.listen(port, () => {
   console.log(`Listening on port ${port}`);
 });
