@@ -2,12 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const app = express();
 const bodyParser = require('body-parser');
-const port = 3000;
-const shortId = require('shortid');
 const db = require('../URL Shortner/Data/db');
 const shorturlModel = require('../URL Shortner/Models/shorturlModel');
+const Counter = require('../URL Shortner/Models/counterModel');
+
+const app = express();
+const port = 3000;
 
 // Database connection
 db();
@@ -17,7 +18,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use('/public', express.static(`${process.cwd()}/public`));
 
-// Route to serve index.html
+// Serve the main HTML page
 app.get('/', (req, res) => {
   res.sendFile(process.cwd() + '/views/index.html');
 });
@@ -27,29 +28,40 @@ app.get('/api/hello', (req, res) => {
   res.json({ greeting: 'hello API' });
 });
 
+// Function to get the next sequence value for short_url
+async function getNextSequenceValue(sequenceName) {
+  const counter = await Counter.findByIdAndUpdate(
+    sequenceName,
+    { $inc: { sequence_value: 1 } },
+    { new: true, upsert: true }
+  );
+  return counter.sequence_value;
+}
+
 // URL Shortener - Create a shortened URL
 app.post('/api/shorturl', async (req, res) => {
   try {
     const { url: client_req_url } = req.body;
 
-    // Validate URL format
-    const urlPattern = /^(https?:\/\/)(www\.)?[\w\-]+\.\w{2,}([\/\w\-]*)*$/;
+    // Enhanced URL validation
+    const urlPattern = /^(https?:\/\/)([\da-z.-]+)\.([a-z.]{2,6})([/\w .-]*)*\/?$/;
     if (!urlPattern.test(client_req_url)) {
       return res.json({ error: 'invalid url' });
     }
 
-    const suffix = shortId.generate();
+    // Get the next short_url number
+    const short_url = await getNextSequenceValue('url_counter');
+
     const newURL = new shorturlModel({
-      short_url: suffix,
+      short_url,
       original_url: client_req_url,
     });
 
     await newURL.save();
 
     res.json({
-      saved: true,
-      short_url: `/api/shorturl/${suffix}`,
       original_url: client_req_url,
+      short_url,
     });
   } catch (err) {
     console.error('Error saving document:', err);
@@ -58,10 +70,10 @@ app.post('/api/shorturl', async (req, res) => {
 });
 
 // URL Shortener - Redirect using the short URL
-app.get('/api/shorturl/:suffix', async (req, res) => {
+app.get('/api/shorturl/:short_url', async (req, res) => {
   try {
-    const { suffix } = req.params;
-    const userRequestedUrl = await shorturlModel.findOne({ short_url: suffix });
+    const { short_url } = req.params;
+    const userRequestedUrl = await shorturlModel.findOne({ short_url });
 
     if (!userRequestedUrl) {
       return res.status(404).json({ error: 'URL not found' });
